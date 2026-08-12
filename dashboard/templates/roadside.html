@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Public Air Quality Display</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --bg: #f8fafc;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Outfit', sans-serif; }
+
+        body {
+            background: var(--bg);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: background 0.5s ease;
+            overflow: hidden;
+        }
+
+        .display-container {
+            text-align: center;
+            width: 90%;
+            max-width: 1000px;
+            background: white;
+            padding: 4rem;
+            border-radius: 3rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15);
+            transition: all 0.5s ease;
+        }
+
+        .location {
+            font-size: 1.5rem;
+            color: #64748b;
+            margin-bottom: 1rem;
+            font-weight: 600;
+        }
+
+        .label {
+            font-size: 1.25rem;
+            text-transform: uppercase;
+            letter-spacing: 0.2rem;
+            color: #94a3b8;
+            margin-bottom: 0.5rem;
+        }
+
+        .aqi-value {
+            font-size: 12rem;
+            font-weight: 800;
+            line-height: 1;
+            margin-bottom: 1rem;
+            transition: color 0.5s ease;
+        }
+
+        .status-text {
+            font-size: 3rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            margin-bottom: 2rem;
+        }
+
+        .message-box {
+            background: #f1f5f9;
+            padding: 2rem;
+            border-radius: 2rem;
+            margin-top: 2rem;
+        }
+
+        .health-msg {
+            font-size: 1.75rem;
+            font-weight: 600;
+            color: #1e293b;
+            margin-bottom: 1rem;
+        }
+
+        .do-dont {
+            font-size: 1.25rem;
+            color: #475569;
+        }
+
+        .trend-badge {
+            display: inline-block;
+            padding: 0.5rem 1.5rem;
+            border-radius: 2rem;
+            font-weight: 700;
+            font-size: 1.25rem;
+            margin-top: 1rem;
+        }
+
+        /* High Pollution Mode */
+        body.alert { background: var(--danger); }
+        body.alert .display-container { transform: scale(1.05); }
+    </style>
+</head>
+<body>
+    <div class="display-container" id="card">
+        <div class="location" id="location">Detecting Location...</div>
+        <div class="label">Air Quality Index (AQI)</div>
+        <div class="aqi-value" id="aqi">--</div>
+        <div class="status-text" id="status">Loading...</div>
+        
+        <div id="trend" class="trend-badge">TREND: --</div>
+
+        <div class="message-box">
+            <div class="health-msg" id="health-msg">Please wait for data...</div>
+            <div class="do-dont" id="do-dont">Monitoring environment in real-time.</div>
+        </div>
+    </div>
+
+    <script>
+        async function updateDisplay() {
+            try {
+                // Get latest data from the database logs
+                const res = await fetch('/get_recent_data');
+                const logs = await res.json();
+                if (logs.length === 0) return;
+                const data = logs[0]; // Get the most recent log
+                
+                // Get trend
+                const trendRes = await fetch('/predict');
+                const trendData = await trendRes.json();
+
+                const aqi = data.aqi;
+                const aqiEl = document.getElementById('aqi');
+                const statusEl = document.getElementById('status');
+                const healthEl = document.getElementById('health-msg');
+                const dodontEl = document.getElementById('do-dont');
+                const trendEl = document.getElementById('trend');
+                const body = document.body;
+
+                aqiEl.innerText = aqi;
+                trendEl.innerText = "TREND: " + (trendData.trend || "Stable");
+
+                if (aqi <= 50) {
+                    body.classList.remove('alert');
+                    aqiEl.style.color = 'var(--success)';
+                    statusEl.innerText = "GOOD";
+                    statusEl.style.color = 'var(--success)';
+                    healthEl.innerText = "Air is clean. Perfect day!";
+                    dodontEl.innerText = "DO: Great for outdoor activities.";
+                } else if (aqi <= 100) {
+                    body.classList.remove('alert');
+                    aqiEl.style.color = 'var(--warning)';
+                    statusEl.innerText = "MODERATE";
+                    statusEl.style.color = 'var(--warning)';
+                    healthEl.innerText = "Air quality is acceptable.";
+                    dodontEl.innerText = "DO: Limit long outdoor exertion.";
+                } else if (aqi <= 150) {
+                    body.classList.add('alert');
+                    aqiEl.style.color = 'var(--danger)';
+                    statusEl.innerText = "UNHEALTHY";
+                    statusEl.style.color = 'var(--danger)';
+                    healthEl.innerText = "Sensitive groups should stay inside.";
+                    dodontEl.innerText = "DO: Wear a mask if outdoors.";
+                } else {
+                    body.classList.add('alert');
+                    aqiEl.style.color = '#7e22ce'; // Purple for very unhealthy
+                    statusEl.innerText = "HAZARDOUS";
+                    statusEl.style.color = '#7e22ce';
+                    healthEl.innerText = "STAY INDOORS. HEALTH WARNING!";
+                    dodontEl.innerText = "DON'T: Avoid all outdoor activities.";
+                }
+
+                // Update location (Reverse Geocode) using the lat/lng from the log
+                if (data.lat !== 0 && window.lastLat !== data.lat) {
+                    try {
+                        const locRes = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${data.lat}&lon=${data.lng}`);
+                        const locData = await locRes.json();
+                        const addr = locData.address || {};
+                        // Priority chain: road → suburb → neighbourhood → city → town → village → district → county → state
+                        const shortName = addr.road || addr.suburb || addr.neighbourhood ||
+                                          addr.city || addr.town || addr.village ||
+                                          addr.district || addr.county || addr.state;
+                        // Full readable address for display
+                        const fullName = locData.display_name || shortName || "Location Found";
+                        document.getElementById('location').innerText = "📍 " + (shortName || fullName);
+                        document.getElementById('location').title = fullName; // Full address on hover
+                    } catch (locErr) {
+                        document.getElementById('location').innerText = `📍 Lat: ${data.lat.toFixed(4)}, Lng: ${data.lng.toFixed(4)}`;
+                    }
+                    window.lastLat = data.lat;
+                }
+
+            } catch (e) {}
+        }
+
+        setInterval(updateDisplay, 5000); // Sync with table every 5s
+        updateDisplay();
+    </script>
+</body>
+</html>
